@@ -107,7 +107,7 @@ export default function App() {
   const hintTimerRef = useRef<NodeJS.Timeout | null>(null);
   const [showStartHint, setShowStartHint] = useState(false);
 
-  const [sshNoBuild, setSshNoBuild] = useState(false);
+  const [isSshCompiling, setIsSshCompiling] = useState(false);
   const [isSshDeploying, setIsSshDeploying] = useState(false);
   const [sshDeployOutput, setSshDeployOutput] = useState('');
   const [sshHost, setSshHost] = useState('192.168.17.246');
@@ -136,15 +136,35 @@ export default function App() {
     }
   };
 
+  const handleSshCompile = async () => {
+    setIsSshCompiling(true);
+    setSshDeployOutput('Команда компиляции запущена...\n');
+    try {
+      const resp = await fetch('/api/ssh-compile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const data = await resp.json();
+      if (resp.ok && data.status === 'success') {
+        setSshDeployOutput(data.output || 'Компиляция успешно завершена.');
+      } else {
+        setSshDeployOutput(data.output || `Ошибка компиляции: ${data.error || 'Неизвестная ошибка'}`);
+      }
+    } catch (e: any) {
+      setSshDeployOutput(`Ошибка сети: ${e.message || e}`);
+    } finally {
+      setIsSshCompiling(false);
+    }
+  };
+
   const handleSshDeploy = async () => {
     setIsSshDeploying(true);
-    setSshDeployOutput('');
+    setSshDeployOutput('Начало загрузки по SSH...\n');
     try {
       const resp = await fetch('/api/ssh-deploy', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          noBuild: sshNoBuild,
           host: sshHost,
           username: sshUsername,
           password: sshPassword,
@@ -787,28 +807,33 @@ export default function App() {
                 </div>
               </div>
 
-              <label className="flex items-center gap-2 cursor-pointer select-none">
-                <input 
-                  type="checkbox"
-                  checked={sshNoBuild}
-                  onChange={(e) => setSshNoBuild(e.target.checked)}
-                  className="accent-red-500 h-3.5 w-3.5"
-                />
-                <span className="text-[10px] text-neutral-600 font-bold uppercase">Не собирать заново (arm)</span>
-              </label>
+              <div className="flex flex-col gap-2">
+                <motion.button 
+                  whileTap={{ scale: 0.98 }}
+                  onClick={handleSshCompile}
+                  disabled={isSshCompiling || isSshDeploying}
+                  className={`w-full py-2.5 text-xs font-bold rounded-lg transition-all shadow-md ${
+                    isSshCompiling 
+                    ? 'bg-neutral-100 text-neutral-400 cursor-not-allowed' 
+                    : 'bg-neutral-800 hover:bg-neutral-700 text-white shadow-neutral-500/10'
+                  }`}
+                >
+                  {isSshCompiling ? 'СБОРКА (ARM)...' : 'СКОМПИЛИРОВАТЬ ДЛЯ ARM'}
+                </motion.button>
 
-              <motion.button 
-                whileTap={{ scale: 0.98 }}
-                onClick={handleSshDeploy}
-                disabled={isSshDeploying}
-                className={`w-full py-2.5 text-xs font-bold rounded-lg transition-all shadow-md ${
-                  isSshDeploying 
-                  ? 'bg-neutral-100 text-neutral-400 cursor-not-allowed' 
-                  : 'bg-red-600 hover:bg-red-500 text-white shadow-red-500/15'
-                }`}
-              >
-                {isSshDeploying ? 'ОТПРАВКА...' : 'ОТПРАВИТЬ ПО SSH'}
-              </motion.button>
+                <motion.button 
+                  whileTap={{ scale: 0.98 }}
+                  onClick={handleSshDeploy}
+                  disabled={isSshCompiling || isSshDeploying}
+                  className={`w-full py-2.5 text-xs font-bold rounded-lg transition-all shadow-md ${
+                    isSshDeploying 
+                    ? 'bg-neutral-100 text-neutral-400 cursor-not-allowed' 
+                    : 'bg-red-600 hover:bg-red-500 text-white shadow-red-500/15'
+                  }`}
+                >
+                  {isSshDeploying ? 'ОТПРАВКА...' : 'ОТПРАВИТЬ ПО SSH'}
+                </motion.button>
+              </div>
 
               {sshDeployOutput && (
                 <div className="mt-2 text-[10px] font-mono whitespace-pre-wrap bg-neutral-900 text-neutral-300 p-3 rounded-lg max-h-56 overflow-y-auto leading-relaxed border border-neutral-800">

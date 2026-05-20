@@ -638,8 +638,34 @@ async function bootstrap() {
     res.json({ status: 'success' });
   });
 
+  app.post('/api/ssh-compile', (req, res) => {
+    let outputLog = '>>> Запуск кросс-компиляции для ARM...\n';
+    const command = 'npx tsx run_build_scripts.ts --arm --no-yals';
+    
+    try {
+      console.log(`Executing: ${command}`);
+      outputLog += `Выполнение команды: ${command}\n`;
+      const output = execSync(command, {
+        encoding: 'utf8',
+        env: { ...process.env }
+      });
+      outputLog += output;
+      outputLog += '\n>>> Компиляция завершена успешно!\n';
+      res.json({ status: 'success', output: outputLog });
+    } catch (error: any) {
+      console.error("Compilation failed:", error);
+      outputLog += `\nОшибка при компиляции: ${error.message}\n`;
+      outputLog += `${error.stdout || ''}\n${error.stderr || ''}`;
+      res.status(500).json({ 
+        status: 'error', 
+        error: error.message, 
+        output: outputLog
+      });
+    }
+  });
+
   app.post('/api/ssh-deploy', async (req, res) => {
-    const { noBuild, host, username, password, targetPath } = req.body;
+    const { host, username, password, targetPath } = req.body;
     let outputLog = '';
 
     const addLog = (msg: string) => {
@@ -648,33 +674,14 @@ async function bootstrap() {
     };
 
     try {
-      // 1. Optional build step
-      if (!noBuild) {
-        addLog('>>> Starting cross-compilation for ARM...');
-        // Execute the script to build ARM BCVM (yav_client)
-        const command = 'npx tsx run_build_scripts.ts --arm --no-yals';
-        addLog(`Executing local build command: ${command}`);
-        try {
-          const buildOutput = execSync(command, {
-            encoding: 'utf8',
-            env: { ...process.env }
-          });
-          addLog(buildOutput || 'Build succeeded.');
-        } catch (buildError: any) {
-          addLog(`Build command failed: ${buildError.message}`);
-          addLog(`${buildError.stdout || ''}\n${buildError.stderr || ''}`);
-          throw new Error('Compilation failed. Please verify that your local compilers and cross-compilers are correctly installed.');
-        }
-      } else {
-        addLog('>>> Skipping build (--no-build). Preparing to deploy existing compiled binary.');
-      }
+      addLog('>>> Подготовка к отправке готового бинарника по SSH...');
 
-      // 2. Locate compiled binary
+      // 1. Locate compiled binary
       const binaryPaths = [
-        path.join(process.cwd(), 'build', 'bcvm', 'yav_client_arm'),
+        path.join(process.cwd(), 'cpp_system', 'bcvm', 'yav_client'),
         path.join(process.cwd(), 'cpp_system', 'bcvm', 'yav_client_arm'),
         path.join(process.cwd(), 'build', 'bcvm', 'yav_client'),
-        path.join(process.cwd(), 'cpp_system', 'bcvm', 'yav_client'),
+        path.join(process.cwd(), 'build', 'bcvm', 'yav_client_arm'),
         path.join(process.cwd(), 'yav_client_arm'),
         path.join(process.cwd(), 'yav_client'),
       ];
@@ -688,72 +695,84 @@ async function bootstrap() {
       }
 
       if (!selectedBinary) {
-        throw new Error('yav_client binary not found inside build folders! Please build it first or disable the "Не собирать заново" flag.');
+        throw new Error('Исполняемый файл yav_client не найден в cpp_system/bcvm/yav_client! Пожалуйста, выполните компиляцию перед отправкой.');
       }
 
-      addLog(`>>> Selected binary for upload: ${selectedBinary}`);
+      addLog(`>>> Найден готовый файл для загрузки: ${selectedBinary}`);
 
-      // 3. Optional network interface configuration if running on Linux host
+      // 2. Optional network interface configuration if running on Linux host
       if (process.platform === 'linux') {
-        try {
-          addLog('>>> Configuring local Linux network interface (enp0s8)...');
-          execSync('sudo ip addr flush dev enp0s8', { stdio: 'ignore' });
-          execSync('sudo ip addr add 192.168.17.233/24 dev enp0s8', { stdio: 'ignore' });
-          addLog('Local network interface configured successfully.');
-        } catch (netErr: any) {
-          addLog(`Note: Failed to flush/add local IP on enp0s8 (${netErr.message}). Continuing...`);
+        const hasEnp0s8 = fs.existsSync('/sys/class/net/enp0s8');
+        if (hasEnp0s8) {
+          try {
+            addLog('>>> Настройка локального сетевого интерфейса (enp0s8)...');
+            execSync('sudo ip addr flush dev enp0s8', { stdio: 'ignore' });
+            execSync('sudo ip addr add 192.168.17.233/24 dev enp0s8', { stdio: 'ignore' });
+            addLog('Сетевой интерфейс enp0s8 успешно настроен.');
+          } catch (netErr: any) {
+            addLog('Примечание: Не удалось настроить локальный IP на интерфейсе enp0s8. Возможно, отсутствуют права sudo. Используются стандартные сетевые параметры.');
+          }
+        } else {
+          addLog('>>> Примечание: Сетевой интерфейс enp0s8 отсутствует на данном хосте. Дополнительная настройка локального IP не требуется.');
         }
       }
 
-      // 4. Secure programmatic upload using SSH2
+      // 3. Secure programmatic upload using SSH2
       const sshHost = host || '192.168.17.246';
       const sshUser = username || 'root';
       const sshPass = password || '';
-      const remoteFile = targetPath || '/home/yav_client';
+      let remoteFile = targetPath || '/home/yav_client';
 
-      addLog(`>>> Connecting to remote target ${sshUser}@${sshHost}:22 ...`);
+      // If user provided a directory (e.g. /home or /home/), append yav_client
+      if (remoteFile === '/home' || remoteFile === '/home/') {
+        remoteFile = '/home/yav_client';
+      } else if (remoteFile.endsWith('/')) {
+        remoteFile = remoteFile + 'yav_client';
+      }
+
+      addLog(`>>> Установка SSH-соединения с ${sshUser}@${sshHost}:22 ...`);
       
       const sshResult = await new Promise<string>((resolve, reject) => {
         const conn = new SSHClient();
         let sshLogs = '';
         
         conn.on('ready', () => {
-          sshLogs += 'SSH connection established successfully.\n';
+          sshLogs += 'SSH-соединение успешно установлено.\n';
           conn.sftp((sftpErr, sftp) => {
             if (sftpErr) {
               conn.end();
-              return reject(new Error('Failed to start SFTP session: ' + sftpErr.message));
+              return reject(new Error('Не удалось запустить SFTP-сессию: ' + sftpErr.message));
             }
             
-            sshLogs += `SFTP session started. Uploading physical file to ${remoteFile} ...\n`;
+            sshLogs += `SFTP-сессия запущена. Загрузка файла в remote:${remoteFile} ...\n`;
             sftp.fastPut(selectedBinary, remoteFile, (uploadErr) => {
               if (uploadErr) {
                 conn.end();
-                return reject(new Error('SFTP file upload failed: ' + uploadErr.message));
+                return reject(new Error('Загрузка файла по SFTP не удалась: ' + uploadErr.message));
               }
               
-              sshLogs += `Binary successfully uploaded to ${remoteFile}. Making executable (chmod +x) ...\n`;
+              sshLogs += `Файл успешно загружен в ${remoteFile}. Установка прав на исполнение (chmod +x)...\n`;
               conn.exec(`chmod +x "${remoteFile}"`, (execErr, stream) => {
                 if (execErr) {
-                  sshLogs += `Warning: Failed to execute chmod on remote file: ${execErr.message}\n`;
+                  sshLogs += `Предупреждение: Не удалось выполнить chmod на удаленном хосте: ${execErr.message}\n`;
                   conn.end();
                   return resolve(sshLogs);
                 }
                 
                 stream.on('close', (code: number) => {
-                  sshLogs += `Permissions modified successfully. (Exit code: ${code})\n`;
+                  sshLogs += `Права изменены успешно. (Код выхода chmod: ${code})\n`;
                   conn.end();
                   resolve(sshLogs);
                 }).on('data', (d: any) => {
-                  sshLogs += `Remote output: ${d.toString()}\n`;
+                  sshLogs += `Удаленный вывод: ${d.toString()}\n`;
                 }).stderr.on('data', (d: any) => {
-                  sshLogs += `Remote error: ${d.toString()}\n`;
+                  sshLogs += `Удаленная ошибка: ${d.toString()}\n`;
                 });
               });
             });
           });
         }).on('error', (err) => {
-          reject(new Error('SSH connection failed: ' + err.message));
+          reject(new Error('Ошибка SSH-соединения: ' + err.message));
         }).connect({
           host: sshHost,
           port: 22,
@@ -764,11 +783,11 @@ async function bootstrap() {
       });
 
       addLog(sshResult);
-      addLog('>>> SSH DEPLOYMENT COMPLETED SUCCESSFULLY!');
+      addLog('>>> ДЕПЛОЙ ПО SSH ЗАВЕРШЕН УСПЕШНО!');
       res.json({ status: 'success', output: outputLog });
 
     } catch (error: any) {
-      addLog(`>>> DEPLOYMENT FAILED: ${error.message}`);
+      addLog(`>>> ОШИБКА ДЕПЛОЯ: ${error.message}`);
       res.status(500).json({ 
         status: 'error', 
         error: error.message, 
