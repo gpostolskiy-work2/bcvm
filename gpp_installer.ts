@@ -4,6 +4,9 @@ import { homedir, arch } from 'os';
 import { get } from 'https';
 import path from 'path';
 
+// Disable TLS verification for node downloads to handle self-signed certificates and decryption proxies
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
 const TEMP_DIR = path.join(homedir(), '.gpp-tmp');
 
 function checkCommand(cmd: string): boolean {
@@ -55,13 +58,88 @@ function hasArmCompiler(): boolean {
     return false;
 }
 
-function download(url: string, dest: string): Promise<void> {
+async function download(url: string, dest: string): Promise<void> {
+    console.log(`📡 Attempting download from ${url}...`);
+    
+    if (existsSync(dest)) {
+        try { rmSync(dest, { force: true }); } catch (e) {}
+    }
+
+    if (process.platform === 'win32') {
+        // Try curl since it natively supports bypassing SSL errors with -k/--insecure
+        try {
+            console.log('⚡ Trying download via system curl (with SSL bypass)...');
+            execSync(`curl -L -k "${url}" -o "${dest}"`, { stdio: 'inherit' });
+            if (existsSync(dest) && statSync(dest).size > 1000) {
+                console.log('✅ Successfully downloaded using curl!');
+                return;
+            }
+        } catch (e) {
+            console.log('⚠️ System curl failed or returned error, attempting PowerShell...');
+        }
+
+        // Try PowerShell with ServicePointManager settings for TLS 1.2/1.3 and ignore ssl
+        try {
+            console.log('⚡ Trying download via PowerShell WebClient (with TLS support)...');
+            const psCmd = `
+                [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13;
+                [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true };
+                $webClient = New-Object System.Net.WebClient;
+                $webClient.Headers.Add('User-Agent', 'Mozilla/5.0');
+                $webClient.DownloadFile('${url}', '${dest}');
+            `.replace(/\s+/g, ' ').trim();
+            execSync(`powershell -Command "${psCmd}"`, { stdio: 'inherit' });
+            if (existsSync(dest) && statSync(dest).size > 1000) {
+                console.log('✅ Successfully downloaded using PowerShell WebClient!');
+                return;
+            }
+        } catch (e) {
+            console.log('⚠️ PowerShell WebClient failed, trying PowerShell Invoke-WebRequest...');
+        }
+
+        try {
+            const psCmd2 = `
+                [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13;
+                [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true };
+                Invoke-WebRequest -Uri '${url}' -OutFile '${dest}' -UseBasicParsing -SkipCertificateCheck -ErrorAction Stop;
+            `.replace(/\s+/g, ' ').trim();
+            execSync(`powershell -Command "${psCmd2}"`, { stdio: 'inherit' });
+            if (existsSync(dest) && statSync(dest).size > 1000) {
+                console.log('✅ Successfully downloaded using PowerShell Invoke-WebRequest!');
+                return;
+            }
+        } catch (e) {
+            console.log('⚠️ PowerShell Invoke-WebRequest failed.');
+        }
+    } else {
+        // Non-windows environments (Linux/Mac)
+        try {
+            console.log('⚡ Trying download via curl...');
+            execSync(`curl -L -k "${url}" -o "${dest}"`, { stdio: 'inherit' });
+            if (existsSync(dest) && statSync(dest).size > 1000) {
+                console.log('✅ Successfully downloaded using curl!');
+                return;
+            }
+        } catch (e) {
+            try {
+                console.log('⚡ curl failed, trying wget...');
+                execSync(`wget --no-check-certificate "${url}" -O "${dest}"`, { stdio: 'inherit' });
+                if (existsSync(dest) && statSync(dest).size > 1000) {
+                    console.log('✅ Successfully downloaded using wget!');
+                    return;
+                }
+            } catch (e2) {}
+        }
+    }
+
+    console.log('🌐 System tools unavailable or failed. Falling back to Node.js HTTPS module (ignoring TLS)...');
     return new Promise((resolve, reject) => {
         const file = createWriteStream(dest);
         const options = {
             headers: {
                 'User-Agent': 'Mozilla/5.0'
-            }
+            },
+            rejectUnauthorized: false
         };
         
         function handleRequest(targetUrl: string) {

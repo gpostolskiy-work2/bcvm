@@ -650,6 +650,11 @@ async function bootstrap() {
         env: { ...process.env }
       });
       outputLog += output;
+      
+      if (output.includes('❌ Ошибки сборки!') || output.includes('Error: Failed building') || output.includes('❌ Error:')) {
+        throw new Error('Обнаружены ошибки сборки в одном из модулей.');
+      }
+      
       outputLog += '\n>>> Компиляция завершена успешно!\n';
       res.json({ status: 'success', output: outputLog });
     } catch (error: any) {
