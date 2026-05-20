@@ -4,6 +4,11 @@
 SRC_DIR=$(pwd)
 BUILD_DIR="../../build/asn"
 
+# Ensure Miniconda's bin is in PATH so cmake, make, and other tools are available
+if [ -d "$HOME/miniconda3/bin" ]; then
+    export PATH="$HOME/miniconda3/bin:$PATH"
+fi
+
 if [[ "$1" == "--arm" ]]; then
     echo "🔧 Setting up ARM (gnueabihf) cross-compilation..."
     export CC="arm-linux-gnueabihf-gcc"
@@ -11,12 +16,9 @@ if [[ "$1" == "--arm" ]]; then
     rm -rf "$BUILD_DIR"
 else
     if [ -z "$CXX" ] && ! command -v g++ &> /dev/null; then
-        if [ -d "$HOME/miniconda3/bin" ]; then
-            export PATH="$HOME/miniconda3/bin:$PATH"
-            if [ -x "$HOME/miniconda3/bin/x86_64-conda-linux-gnu-g++" ]; then
-                export CC="$HOME/miniconda3/bin/x86_64-conda-linux-gnu-gcc"
-                export CXX="$HOME/miniconda3/bin/x86_64-conda-linux-gnu-g++"
-            fi
+        if [ -x "$HOME/miniconda3/bin/x86_64-conda-linux-gnu-g++" ]; then
+            export CC="$HOME/miniconda3/bin/x86_64-conda-linux-gnu-gcc"
+            export CXX="$HOME/miniconda3/bin/x86_64-conda-linux-gnu-g++"
         fi
     fi
 fi

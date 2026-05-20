@@ -82,7 +82,7 @@ async function installViaConda(): Promise<boolean> {
         console.log('⚠️ Could not accept TOS, continuing anyway...');
     }
     
-    execSync(`${condaPath} install -c conda-forge gxx_linux-64 cmake make -y`);
+    execSync(`${condaPath} install -c conda-forge gxx_linux-64 gxx_linux-armhf cmake make -y`);
     
     const condaBin = path.join(homedir(), 'miniconda3', 'bin');
     const prefixedGpp = path.join(condaBin, 'x86_64-conda-linux-gnu-g++');
