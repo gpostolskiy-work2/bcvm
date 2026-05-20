@@ -161,6 +161,7 @@ public:
         std::string opIp = config_.operatorIp.empty() ? "0.0.0.0" : config_.operatorIp;
         std::cout << "  " << opIp << ":" << config_.operatorRemotePort << " -> " << config_.yavIp << ":" << config_.operatorLocalPort << " [ОПЕРАТОР -> БЦВМ]" << std::endl;
         std::cout << "  " << config_.yavIp << ":" << config_.yalsLocalPort << " -> " << config_.yalsIp << ":" << config_.yalsRemotePort << " [БЦВМ -> ЯЛС]" << std::endl;
+        std::cout << "  " << config_.yavIp << ":" << config_.asnLocalPort << " <-> " << config_.asnIp << ":" << config_.asnRemotePort << " [БЦВМ <-> АСН]" << std::endl;
         return true;
     }
 

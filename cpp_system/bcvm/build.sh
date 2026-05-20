@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build script for YAV Client
+# Build script for BCVM
 
 SRC_DIR=$(pwd)
 BUILD_DIR="../../build/bcvm"
@@ -89,28 +89,28 @@ cmake --build .
 
 echo "Locating build binary..."
 FOUND_BINARY=""
-if [ -f "yav_client" ]; then
-    FOUND_BINARY="yav_client"
-elif [ -f "Debug/yav_client.exe" ]; then
-    FOUND_BINARY="Debug/yav_client.exe"
-elif [ -f "Release/yav_client.exe" ]; then
-    FOUND_BINARY="Release/yav_client.exe"
-elif [ -f "Debug/yav_client" ]; then
-    FOUND_BINARY="Debug/yav_client"
-elif [ -f "Release/yav_client" ]; then
-    FOUND_BINARY="Release/yav_client"
-elif [ -f "yav_client.exe" ]; then
-    FOUND_BINARY="yav_client.exe"
+if [ -f "bcvm" ]; then
+    FOUND_BINARY="bcvm"
+elif [ -f "Debug/bcvm.exe" ]; then
+    FOUND_BINARY="Debug/bcvm.exe"
+elif [ -f "Release/bcvm.exe" ]; then
+    FOUND_BINARY="Release/bcvm.exe"
+elif [ -f "Debug/bcvm" ]; then
+    FOUND_BINARY="Debug/bcvm"
+elif [ -f "Release/bcvm" ]; then
+    FOUND_BINARY="Release/bcvm"
+elif [ -f "bcvm.exe" ]; then
+    FOUND_BINARY="bcvm.exe"
 fi
 
 if [ -n "$FOUND_BINARY" ]; then
     echo "Found compiled binary: $FOUND_BINARY"
-    cp "$FOUND_BINARY" "$SRC_DIR/yav_client"
+    cp "$FOUND_BINARY" "$SRC_DIR/bcvm"
     if [[ "$1" == "--arm" ]]; then
-        cp "$FOUND_BINARY" "$SRC_DIR/yav_client_arm"
+        cp "$FOUND_BINARY" "$SRC_DIR/bcvm_arm"
     fi
 else
-    echo "❌ Error: Compiled binary yav_client not found in build directory!"
+    echo "❌ Error: Compiled binary bcvm not found in build directory!"
     exit 1
 fi
 
