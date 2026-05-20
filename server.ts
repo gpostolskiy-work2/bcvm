@@ -645,9 +645,14 @@ async function bootstrap() {
     }
     args.push('--no-yals');
     
+    const isWin = process.platform === 'win32';
+    const command = isWin 
+      ? `powershell -ExecutionPolicy Bypass -File run_build_scripts.ps1 ${args.join(' ')}`
+      : `bash run_build_scripts.sh ${args.join(' ')}`;
+
     try {
-      console.log(`Executing bash run_build_scripts.sh ${args.join(' ')}`);
-      const output = execSync(`bash run_build_scripts.sh ${args.join(' ')}`, {
+      console.log(`Executing: ${command}`);
+      const output = execSync(command, {
         encoding: 'utf8',
         env: { ...process.env }
       });
