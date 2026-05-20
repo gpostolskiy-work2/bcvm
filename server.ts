@@ -676,29 +676,63 @@ async function bootstrap() {
     try {
       addLog('>>> Подготовка к отправке готового бинарника по SSH...');
 
-      // 1. Locate compiled binary
+      // 1. Locate compiled binary - programmatically identify and select the best executable
       const binaryPaths = [
-        path.join(process.cwd(), 'cpp_system', 'bcvm', 'yav_client'),
         path.join(process.cwd(), 'cpp_system', 'bcvm', 'yav_client_arm'),
-        path.join(process.cwd(), 'build', 'bcvm', 'yav_client'),
+        path.join(process.cwd(), 'cpp_system', 'bcvm', 'yav_client'),
         path.join(process.cwd(), 'build', 'bcvm', 'yav_client_arm'),
+        path.join(process.cwd(), 'build', 'bcvm', 'yav_client'),
         path.join(process.cwd(), 'yav_client_arm'),
         path.join(process.cwd(), 'yav_client'),
       ];
 
+      const candidates = binaryPaths.filter(p => fs.existsSync(p));
+      const evaluatedCandidates = candidates.map(p => {
+        try {
+          const fd = fs.openSync(p, 'r');
+          const buffer = Buffer.alloc(4);
+          fs.readSync(fd, buffer, 0, 4, 0);
+          fs.closeSync(fd);
+          const isElf = buffer[0] === 0x7F && buffer[1] === 0x45 && buffer[2] === 0x4C && buffer[3] === 0x46; // \x7fELF
+          const isExe = buffer[0] === 0x4D && buffer[1] === 0x5A; // MZ header
+          const mtime = fs.statSync(p).mtimeMs;
+          const name = path.basename(p);
+          const isArmNamed = name.includes('arm');
+          return { path: p, isElf, isExe, mtime, isArmNamed };
+        } catch (e) {
+          return { path: p, isElf: false, isExe: false, mtime: 0, isArmNamed: false };
+        }
+      });
+
+      // Sort evaluated candidates:
+      // 1. Highly prefer Linux ELF binaries over Windows MSVC EXEs
+      // 2. Prefer ARM-named files (e.g., yav_client_arm)
+      // 3. Prefer the newest modified file
+      evaluatedCandidates.sort((a, b) => {
+        if (a.isElf && !b.isElf) return -1;
+        if (!a.isElf && b.isElf) return 1;
+        if (a.isArmNamed && !b.isArmNamed) return -1;
+        if (!a.isArmNamed && b.isArmNamed) return 1;
+        return b.mtime - a.mtime;
+      });
+
       let selectedBinary = '';
-      for (const p of binaryPaths) {
-        if (fs.existsSync(p)) {
-          selectedBinary = p;
-          break;
+      if (evaluatedCandidates.length > 0) {
+        selectedBinary = evaluatedCandidates[0].path;
+        const info = evaluatedCandidates[0];
+        addLog(`>>> Выбран файл для отправки: ${selectedBinary}`);
+        addLog(`    Тип формата: ${info.isElf ? 'Linux ELF (Рекомендуется)' : info.isExe ? 'Windows PE/EXE (Несовместим с Linux)' : 'Неопределено'}`);
+        addLog(`    Время сборки: ${new Date(info.mtime).toLocaleString()}`);
+        
+        if (info.isExe) {
+          addLog('⚠️ ВНИМАНИЕ: Выбран исполняемый файл Windows (.exe). Он не запустится на удаленном Линуксе!');
+          addLog('   Пожалуйста, собирайте бинарник непосредственно в облачном контейнере или под WSL с компилятором arm-linux-gnueabihf.');
         }
       }
 
       if (!selectedBinary) {
-        throw new Error('Исполняемый файл yav_client не найден в cpp_system/bcvm/yav_client! Пожалуйста, выполните компиляцию перед отправкой.');
+        throw new Error('Исполняемый файл yav_client не найден! Обязательно выполните компиляцию перед отправкой.');
       }
-
-      addLog(`>>> Найден готовый файл для загрузки: ${selectedBinary}`);
 
       // 2. Optional network interface configuration if running on Linux host
       if (process.platform === 'linux') {
