@@ -6,6 +6,7 @@ import { createServer as createViteServer } from 'vite';
 import * as dgram from 'dgram';
 import * as os from 'os';
 import { spawn, ChildProcess, execSync } from 'child_process';
+import { Client as SSHClient } from 'ssh2';
 import { SERVER_CONFIG } from './src/config_data';
 import { ISystemLog } from './src/protocol';
 
@@ -637,32 +638,141 @@ async function bootstrap() {
     res.json({ status: 'success' });
   });
 
-  app.post('/api/ssh-deploy', (req, res) => {
-    const { noBuild } = req.body;
-    const args: string[] = [];
-    if (noBuild) {
-      args.push('--no-build');
-    }
-    args.push('--no-yals');
-    
-    const isWin = process.platform === 'win32';
-    const command = isWin 
-      ? `powershell -ExecutionPolicy Bypass -File run_build_scripts.ps1 ${args.join(' ')}`
-      : `bash run_build_scripts.sh ${args.join(' ')}`;
+  app.post('/api/ssh-deploy', async (req, res) => {
+    const { noBuild, host, username, password, targetPath } = req.body;
+    let outputLog = '';
+
+    const addLog = (msg: string) => {
+      console.log(msg);
+      outputLog += msg + '\n';
+    };
 
     try {
-      console.log(`Executing: ${command}`);
-      const output = execSync(command, {
-        encoding: 'utf8',
-        env: { ...process.env }
+      // 1. Optional build step
+      if (!noBuild) {
+        addLog('>>> Starting cross-compilation for ARM...');
+        // Execute the script to build ARM BCVM (yav_client)
+        const command = 'npx tsx run_build_scripts.ts --arm --no-yals';
+        addLog(`Executing local build command: ${command}`);
+        try {
+          const buildOutput = execSync(command, {
+            encoding: 'utf8',
+            env: { ...process.env }
+          });
+          addLog(buildOutput || 'Build succeeded.');
+        } catch (buildError: any) {
+          addLog(`Build command failed: ${buildError.message}`);
+          addLog(`${buildError.stdout || ''}\n${buildError.stderr || ''}`);
+          throw new Error('Compilation failed. Please verify that your local compilers and cross-compilers are correctly installed.');
+        }
+      } else {
+        addLog('>>> Skipping build (--no-build). Preparing to deploy existing compiled binary.');
+      }
+
+      // 2. Locate compiled binary
+      const binaryPaths = [
+        path.join(process.cwd(), 'build', 'bcvm', 'yav_client_arm'),
+        path.join(process.cwd(), 'cpp_system', 'bcvm', 'yav_client_arm'),
+        path.join(process.cwd(), 'build', 'bcvm', 'yav_client'),
+        path.join(process.cwd(), 'cpp_system', 'bcvm', 'yav_client'),
+        path.join(process.cwd(), 'yav_client_arm'),
+        path.join(process.cwd(), 'yav_client'),
+      ];
+
+      let selectedBinary = '';
+      for (const p of binaryPaths) {
+        if (fs.existsSync(p)) {
+          selectedBinary = p;
+          break;
+        }
+      }
+
+      if (!selectedBinary) {
+        throw new Error('yav_client binary not found inside build folders! Please build it first or disable the "Не собирать заново" flag.');
+      }
+
+      addLog(`>>> Selected binary for upload: ${selectedBinary}`);
+
+      // 3. Optional network interface configuration if running on Linux host
+      if (process.platform === 'linux') {
+        try {
+          addLog('>>> Configuring local Linux network interface (enp0s8)...');
+          execSync('sudo ip addr flush dev enp0s8', { stdio: 'ignore' });
+          execSync('sudo ip addr add 192.168.17.233/24 dev enp0s8', { stdio: 'ignore' });
+          addLog('Local network interface configured successfully.');
+        } catch (netErr: any) {
+          addLog(`Note: Failed to flush/add local IP on enp0s8 (${netErr.message}). Continuing...`);
+        }
+      }
+
+      // 4. Secure programmatic upload using SSH2
+      const sshHost = host || '192.168.17.246';
+      const sshUser = username || 'root';
+      const sshPass = password || '';
+      const remoteFile = targetPath || '/home/yav_client';
+
+      addLog(`>>> Connecting to remote target ${sshUser}@${sshHost}:22 ...`);
+      
+      const sshResult = await new Promise<string>((resolve, reject) => {
+        const conn = new SSHClient();
+        let sshLogs = '';
+        
+        conn.on('ready', () => {
+          sshLogs += 'SSH connection established successfully.\n';
+          conn.sftp((sftpErr, sftp) => {
+            if (sftpErr) {
+              conn.end();
+              return reject(new Error('Failed to start SFTP session: ' + sftpErr.message));
+            }
+            
+            sshLogs += `SFTP session started. Uploading physical file to ${remoteFile} ...\n`;
+            sftp.fastPut(selectedBinary, remoteFile, (uploadErr) => {
+              if (uploadErr) {
+                conn.end();
+                return reject(new Error('SFTP file upload failed: ' + uploadErr.message));
+              }
+              
+              sshLogs += `Binary successfully uploaded to ${remoteFile}. Making executable (chmod +x) ...\n`;
+              conn.exec(`chmod +x "${remoteFile}"`, (execErr, stream) => {
+                if (execErr) {
+                  sshLogs += `Warning: Failed to execute chmod on remote file: ${execErr.message}\n`;
+                  conn.end();
+                  return resolve(sshLogs);
+                }
+                
+                stream.on('close', (code: number) => {
+                  sshLogs += `Permissions modified successfully. (Exit code: ${code})\n`;
+                  conn.end();
+                  resolve(sshLogs);
+                }).on('data', (d: any) => {
+                  sshLogs += `Remote output: ${d.toString()}\n`;
+                }).stderr.on('data', (d: any) => {
+                  sshLogs += `Remote error: ${d.toString()}\n`;
+                });
+              });
+            });
+          });
+        }).on('error', (err) => {
+          reject(new Error('SSH connection failed: ' + err.message));
+        }).connect({
+          host: sshHost,
+          port: 22,
+          username: sshUser,
+          password: sshPass,
+          readyTimeout: 15000
+        });
       });
-      res.json({ status: 'success', output });
+
+      addLog(sshResult);
+      addLog('>>> SSH DEPLOYMENT COMPLETED SUCCESSFULLY!');
+      res.json({ status: 'success', output: outputLog });
+
     } catch (error: any) {
-      console.error("SSH deploy failed:", error);
+      addLog(`>>> DEPLOYMENT FAILED: ${error.message}`);
       res.status(500).json({ 
         status: 'error', 
         error: error.message, 
-        output: `${error.stdout || ''}\n${error.stderr || ''}` || error.message 
+        output: outputLog 
       });
     }
   });

@@ -110,6 +110,10 @@ export default function App() {
   const [sshNoBuild, setSshNoBuild] = useState(false);
   const [isSshDeploying, setIsSshDeploying] = useState(false);
   const [sshDeployOutput, setSshDeployOutput] = useState('');
+  const [sshHost, setSshHost] = useState('192.168.17.246');
+  const [sshUsername, setSshUsername] = useState('root');
+  const [sshPassword, setSshPassword] = useState('');
+  const [sshTargetPath, setSshTargetPath] = useState('/home/yav_client');
 
   const sendFiles = async () => {
     if (!files.cyclogram || !files.mission) return;
@@ -139,7 +143,13 @@ export default function App() {
       const resp = await fetch('/api/ssh-deploy', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ noBuild: sshNoBuild })
+        body: JSON.stringify({ 
+          noBuild: sshNoBuild,
+          host: sshHost,
+          username: sshUsername,
+          password: sshPassword,
+          targetPath: sshTargetPath
+        })
       });
       const data = await resp.json();
       if (resp.ok && data.status === 'success') {
@@ -731,12 +741,58 @@ export default function App() {
               <span className={`h-2 w-2 rounded-full ${isSshDeploying ? 'bg-red-500 animate-pulse' : 'bg-neutral-200'}`}></span>
             </summary>
             <div className="px-4 pb-4 space-y-3 pt-2">
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[9px] text-neutral-400 uppercase font-bold block mb-1">IP-Адрес БЦВМ</label>
+                  <input
+                    type="text"
+                    value={sshHost}
+                    onChange={(e) => setSshHost(e.target.value)}
+                    className="w-full text-xs p-1.5 bg-neutral-50 border border-neutral-200 rounded focus:border-red-500 outline-none"
+                    placeholder="192.168.17.246"
+                  />
+                </div>
+                <div>
+                  <label className="text-[9px] text-neutral-400 uppercase font-bold block mb-1">Пользователь</label>
+                  <input
+                    type="text"
+                    value={sshUsername}
+                    onChange={(e) => setSshUsername(e.target.value)}
+                    className="w-full text-xs p-1.5 bg-neutral-50 border border-neutral-200 rounded focus:border-red-500 outline-none"
+                    placeholder="root"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[9px] text-neutral-400 uppercase font-bold block mb-1">Пароль (SSH)</label>
+                  <input
+                    type="password"
+                    value={sshPassword}
+                    onChange={(e) => setSshPassword(e.target.value)}
+                    className="w-full text-xs p-1.5 bg-neutral-50 border border-neutral-200 rounded focus:border-red-500 outline-none font-mono"
+                    placeholder="Пароль"
+                  />
+                </div>
+                <div>
+                  <label className="text-[9px] text-neutral-400 uppercase font-bold block mb-1">Удаленный путь</label>
+                  <input
+                    type="text"
+                    value={sshTargetPath}
+                    onChange={(e) => setSshTargetPath(e.target.value)}
+                    className="w-full text-xs p-1.5 bg-neutral-50 border border-neutral-200 rounded focus:border-red-500 outline-none"
+                    placeholder="/home/yav_client"
+                  />
+                </div>
+              </div>
+
               <label className="flex items-center gap-2 cursor-pointer select-none">
                 <input 
                   type="checkbox"
                   checked={sshNoBuild}
                   onChange={(e) => setSshNoBuild(e.target.checked)}
-                  className="accent-red-500 h-3.5 w-3.5 animate-none"
+                  className="accent-red-500 h-3.5 w-3.5"
                 />
                 <span className="text-[10px] text-neutral-600 font-bold uppercase">Не собирать заново (arm)</span>
               </label>
@@ -755,7 +811,7 @@ export default function App() {
               </motion.button>
 
               {sshDeployOutput && (
-                <div className="mt-2 text-[9px] font-mono whitespace-pre-wrap bg-neutral-900 text-red-400 p-3 rounded-lg max-h-48 overflow-y-auto leading-relaxed border border-neutral-800">
+                <div className="mt-2 text-[10px] font-mono whitespace-pre-wrap bg-neutral-900 text-neutral-300 p-3 rounded-lg max-h-56 overflow-y-auto leading-relaxed border border-neutral-800">
                   {sshDeployOutput}
                 </div>
               )}
