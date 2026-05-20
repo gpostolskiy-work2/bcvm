@@ -42,3 +42,7 @@ cmake --build .
 
 echo "Build finished. Binary: $(pwd)/yav_client"
 cp yav_client "$SRC_DIR/yav_client"
+if [[ "$1" == "--arm" ]]; then
+    cp yav_client "$SRC_DIR/yav_client_arm"
+    cp yav_client "yav_client_arm" 2>/dev/null || true
+fi

@@ -46,8 +46,14 @@ else
 fi
 
 # SSH Deployment steps for BCVM (YAV Client)
-BINARY_PATH="./build/bcvm/yav_client"
-if [ ! -f "$BINARY_PATH" ]; then
+BINARY_PATH=""
+if [ -f "./build/bcvm/yav_client_arm" ]; then
+    BINARY_PATH="./build/bcvm/yav_client_arm"
+elif [ -f "./cpp_system/bcvm/yav_client_arm" ]; then
+    BINARY_PATH="./cpp_system/bcvm/yav_client_arm"
+elif [ -f "./build/bcvm/yav_client" ]; then
+    BINARY_PATH="./build/bcvm/yav_client"
+elif [ -f "./cpp_system/bcvm/yav_client" ]; then
     BINARY_PATH="./cpp_system/bcvm/yav_client"
 fi
 

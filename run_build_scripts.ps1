@@ -34,8 +34,14 @@ if ($SkipBuild -eq $false) {
 }
 
 # SSH deployment configuration
-$binaryPath = "build\bcvm\yav_client"
-if (-not (Test-Path $binaryPath)) {
+$binaryPath = ""
+if (Test-Path "build\bcvm\yav_client_arm") {
+    $binaryPath = "build\bcvm\yav_client_arm"
+} elseif (Test-Path "cpp_system\bcvm\yav_client_arm") {
+    $binaryPath = "cpp_system\bcvm\yav_client_arm"
+} elseif (Test-Path "build\bcvm\yav_client") {
+    $binaryPath = "build\bcvm\yav_client"
+} elseif (Test-Path "cpp_system\bcvm\yav_client") {
     $binaryPath = "cpp_system\bcvm\yav_client"
 }
 

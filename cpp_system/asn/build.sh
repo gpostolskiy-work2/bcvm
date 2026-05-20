@@ -37,3 +37,7 @@ cmake --build .
 
 echo "Build finished. Binary: $(pwd)/asn_simulator"
 cp asn_simulator "$SRC_DIR/asn_simulator"
+if [[ "$1" == "--arm" ]]; then
+    cp asn_simulator "$SRC_DIR/asn_simulator_arm"
+    cp asn_simulator "asn_simulator_arm" 2>/dev/null || true
+fi
