@@ -7,14 +7,24 @@ BUILD_DIR="../../build/asn"
 if [[ "$1" == "--arm" ]]; then
     echo "🔧 Setting up ARM (gnueabihf) cross-compilation..."
     
-    # Pre-check for arm compiler
-    if ! command -v arm-linux-gnueabihf-g++ &> /dev/null; then
-        echo "❌ Error: arm-linux-gnueabihf-g++ compiler is not found in PATH."
+    # Pre-check for arm compiler (support both generic arm-linux-gnueabihf and official arm-none-linux-gnueabihf)
+    ARM_GXX=""
+    ARM_GCC=""
+    if command -v arm-linux-gnueabihf-g++ &> /dev/null; then
+        ARM_GXX="arm-linux-gnueabihf-g++"
+        ARM_GCC="arm-linux-gnueabihf-gcc"
+    elif command -v arm-none-linux-gnueabihf-g++ &> /dev/null; then
+        ARM_GXX="arm-none-linux-gnueabihf-g++"
+        ARM_GCC="arm-none-linux-gnueabihf-gcc"
+    fi
+
+    if [[ -z "$ARM_GXX" ]]; then
+        echo "❌ Error: Neither arm-linux-gnueabihf-g++ nor arm-none-linux-gnueabihf-g++ compiler is found in PATH."
         exit 1
     fi
     
-    export CC="arm-linux-gnueabihf-gcc"
-    export CXX="arm-linux-gnueabihf-g++"
+    export CC="$ARM_GCC"
+    export CXX="$ARM_GXX"
     rm -rf "$BUILD_DIR"
 else
     if [ -z "$CXX" ] && ! command -v g++ &> /dev/null; then

@@ -1,11 +1,27 @@
-
 import { execSync } from 'child_process';
 import path from 'path';
 import { existsSync } from 'fs';
+import { homedir } from 'os';
 
 const isArm = process.argv.includes('--arm');
 const noYals = process.argv.includes('--no-yals');
 const buildArg = isArm ? ' --arm' : '';
+
+// Function to update PATH with local binary locations so scripts can find compilers easily
+function updateProcessPath() {
+    const pathsToAdd = [
+        path.join(homedir(), 'local', 'arm-toolchain', 'bin'),
+        path.join(homedir(), 'local', 'gcc-arm-10.3-2021.07-mingw-w64-i686-arm-none-linux-gnueabihf', 'bin'),
+        path.join(homedir(), 'miniconda3', 'bin')
+    ];
+    for (const p of pathsToAdd) {
+        if (existsSync(p)) {
+            process.env.PATH = `${p}${path.delimiter}${process.env.PATH}`;
+        }
+    }
+}
+
+updateProcessPath();
 
 function getBashCommand(): string {
     if (process.platform !== 'win32') {
@@ -47,13 +63,43 @@ function getBashCommand(): string {
     return 'bash'; // fallback
 }
 
+// Automatically check and run gpp_installer if compiling for ARM and no arm compilers present
+if (isArm) {
+    const hasCompiler = () => {
+        try {
+            execSync('arm-linux-gnueabihf-g++ --version', { stdio: 'ignore' });
+            return true;
+        } catch {
+            try {
+                execSync('arm-none-linux-gnueabihf-g++ --version', { stdio: 'ignore' });
+                return true;
+            } catch {
+                return false;
+            }
+        }
+    };
+
+    if (!hasCompiler()) {
+        console.log('🔍 ARM кросс-компилятор не обнаружен в PATH. Запуск подготовки...');
+        try {
+            execSync('npx tsx gpp_installer.ts', { stdio: 'inherit' });
+            // Update PATH environment in current process again so we pick up the newly installed compiler
+            updateProcessPath();
+        } catch (e) {
+            console.error('⚠️ Предупреждение: Ошибка в процессе подготовки компилятора.');
+        }
+    }
+}
+
 const bashCmd = getBashCommand();
+let hasError = false;
 
 function runBuild(dir: string) {
     console.log(`\n--- Running build.sh in ${dir}${buildArg} ---`);
     const fullPath = path.join(process.cwd(), dir);
     if (!existsSync(path.join(fullPath, 'build.sh'))) {
         console.error(`Error: build.sh not found in ${dir}`);
+        hasError = true;
         return;
     }
     try {
@@ -63,7 +109,8 @@ function runBuild(dir: string) {
             env: { ...process.env }
         });
     } catch (e) {
-        console.error(`Error building in ${dir}`);
+        console.error(`Error: Failed building module ${dir}`);
+        hasError = true;
     }
 }
 
@@ -72,3 +119,10 @@ if (!noYals) {
     runBuild('cpp_system/yals');
 }
 runBuild('cpp_system/asn');
+
+if (hasError) {
+    console.error('\n❌ Ошибки сборки! Один или несколько модулей завершились неудачно.');
+    process.exit(1);
+} else {
+    console.log('\n✨ Все модули успешно скомпилированы!');
+}
