@@ -245,7 +245,7 @@ async function installArmCompiler(): Promise<boolean> {
 
         const ensureNinja = async (bDir: string): Promise<void> => {
             const ninjaExe = path.join(bDir, 'ninja.exe');
-            if (!existsSync(ninjaExe) && !checkCommand('ninja') && !checkCommand('make') && !checkCommand('mingw32-make')) {
+            if (!existsSync(ninjaExe)) {
                 console.log('⚡ Настраиваем встроенный Ninja для сборки на Windows...');
                 const ninjaZip = path.join(TEMP_DIR, 'ninja.zip');
                 const ninjaUrl = 'https://github.com/ninja-build/ninja/releases/download/v1.12.1/ninja-win.zip';

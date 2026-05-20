@@ -49,13 +49,22 @@ cd "$BUILD_DIR" || exit
 declare -a CMAKE_OPTS=()
 if [[ "$1" == "--arm" ]]; then
     CMAKE_OPTS=(-DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=arm -DCMAKE_C_COMPILER="$ARM_GCC" -DCMAKE_CXX_COMPILER="$ARM_GXX")
-    if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || "$(uname)" =~ "MINGW" || "$(uname)" =~ "MSYS" ]]; then
-        if command -v ninja &> /dev/null; then
+    
+    IS_WINDOWS=false
+    if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || "$OS" == "Windows_NT" || -n "$WINDIR" || "$(uname)" =~ "MINGW" || "$(uname)" =~ "MSYS" ]]; then
+        IS_WINDOWS=true
+    fi
+
+    if [[ "$IS_WINDOWS" == "true" ]]; then
+        if command -v ninja &> /dev/null || command -v ninja.exe &> /dev/null; then
             CMAKE_OPTS+=(-G "Ninja")
-        elif command -v mingw32-make &> /dev/null; then
+        elif command -v mingw32-make &> /dev/null || command -v mingw32-make.exe &> /dev/null; then
             CMAKE_OPTS+=(-G "MinGW Makefiles")
-        elif command -v make &> /dev/null; then
+        elif command -v make &> /dev/null || command -v make.exe &> /dev/null; then
             CMAKE_OPTS+=(-G "Unix Makefiles")
+        else
+            # Default to Ninja if on Windows which is guaranteed to be in the toolchain PATH
+            CMAKE_OPTS+=(-G "Ninja")
         fi
     fi
 fi

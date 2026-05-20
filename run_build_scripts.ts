@@ -66,17 +66,20 @@ function getBashCommand(): string {
 // Automatically check and run gpp_installer if compiling for ARM and no arm compilers present
 if (isArm) {
     const hasCompiler = () => {
-        try {
-            execSync('arm-linux-gnueabihf-g++ --version', { stdio: 'ignore' });
-            return true;
-        } catch {
+        const checkCmd = (cmd: string) => {
             try {
-                execSync('arm-none-linux-gnueabihf-g++ --version', { stdio: 'ignore' });
+                execSync(`${cmd} --version`, { stdio: 'ignore' });
                 return true;
             } catch {
                 return false;
             }
+        };
+        const hasGcc = checkCmd('arm-linux-gnueabihf-g++') || checkCmd('arm-none-linux-gnueabihf-g++');
+        if (!hasGcc) return false;
+        if (process.platform === 'win32') {
+            return checkCmd('ninja') || checkCmd('make') || checkCmd('mingw32-make');
         }
+        return true;
     };
 
     if (!hasCompiler()) {
