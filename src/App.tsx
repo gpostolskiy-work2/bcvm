@@ -115,6 +115,71 @@ export default function App() {
   const [sshPassword, setSshPassword] = useState('');
   const [sshTargetPath, setSshTargetPath] = useState('/home/yav_client');
 
+  const [compileProgress, setCompileProgress] = useState({ pct: 0, stage: '' });
+  const [isSshDetailsOpen, setIsSshDetailsOpen] = useState(() => {
+    const saved = localStorage.getItem(STORAGE_PREFIX + 'ssh_details_open');
+    return saved === 'true';
+  });
+  const sshLogEndRef = useRef<HTMLDivElement>(null);
+
+  // Poll compilation status on mount
+  useEffect(() => {
+    const checkCompileStatus = async () => {
+      try {
+        const resp = await fetch('/api/ssh-compile-status');
+        const data = await resp.json();
+        if (data.output) {
+          setSshDeployOutput(data.output);
+        }
+        if (data.pct !== undefined && data.stage !== undefined) {
+          setCompileProgress({ pct: data.pct, stage: data.stage });
+        }
+        if (data.status === 'running') {
+          setIsSshCompiling(true);
+        }
+      } catch (e) {
+        console.error('Failed to get compilation status on mount:', e);
+      }
+    };
+    checkCompileStatus();
+  }, [STORAGE_PREFIX]);
+
+  // Poll compilation status when compilation is active
+  useEffect(() => {
+    if (!isSshCompiling) return;
+
+    let timer: NodeJS.Timeout;
+    const poll = async () => {
+      try {
+        const resp = await fetch('/api/ssh-compile-status');
+        const data = await resp.json();
+        if (data.output) {
+          setSshDeployOutput(data.output);
+        }
+        if (data.pct !== undefined && data.stage !== undefined) {
+          setCompileProgress({ pct: data.pct, stage: data.stage });
+        }
+        if (data.status !== 'running') {
+          setIsSshCompiling(false);
+        }
+      } catch (e) {
+        console.error('Error polling compile status:', e);
+      }
+    };
+
+    timer = setInterval(poll, 1000);
+    poll();
+
+    return () => clearInterval(timer);
+  }, [isSshCompiling]);
+
+  // Scroll to bottom of ssh logs when output updates
+  useEffect(() => {
+    if (sshLogEndRef.current) {
+      sshLogEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [sshDeployOutput, isSshCompiling]);
+
   const sendFiles = async () => {
     if (!files.cyclogram || !files.mission) return;
     setIsPayloadUpdating(true);
@@ -138,21 +203,20 @@ export default function App() {
 
   const handleSshCompile = async () => {
     setIsSshCompiling(true);
-    setSshDeployOutput('Команда компиляции запущена...\n');
+    setSshDeployOutput('Команда компиляции запущена в фоновом режиме...\n');
+    setCompileProgress({ pct: 5, stage: 'Запуск компиляции...' });
     try {
       const resp = await fetch('/api/ssh-compile', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
       });
       const data = await resp.json();
-      if (resp.ok && data.status === 'success') {
-        setSshDeployOutput(data.output || 'Компиляция успешно завершена.');
-      } else {
-        setSshDeployOutput(data.output || `Ошибка компиляции: ${data.error || 'Неизвестная ошибка'}`);
+      if (!resp.ok || data.status !== 'success') {
+        setSshDeployOutput(prev => prev + `\nНе удалось запустить сборку: ${data.error || 'Неизвестная ошибка'}`);
+        setIsSshCompiling(false);
       }
     } catch (e: any) {
-      setSshDeployOutput(`Ошибка сети: ${e.message || e}`);
-    } finally {
+      setSshDeployOutput(prev => prev + `\nОшибка сети: ${e.message || e}`);
       setIsSshCompiling(false);
     }
   };
@@ -755,10 +819,18 @@ export default function App() {
             </div>
           </details>
 
-          <details className="bg-white border border-neutral-200 rounded-lg shadow-xl group border-l-4 border-l-red-500">
+          <details 
+            open={isSshDetailsOpen}
+            onToggle={(e) => {
+              const isOpen = (e.currentTarget as HTMLDetailsElement).open;
+              setIsSshDetailsOpen(isOpen);
+              localStorage.setItem(STORAGE_PREFIX + 'ssh_details_open', String(isOpen));
+            }}
+            className="bg-white border border-neutral-200 rounded-lg shadow-xl group border-l-4 border-l-red-500"
+          >
             <summary className="p-4 cursor-pointer flex items-center justify-between text-sm font-bold text-red-500 uppercase tracking-widest list-none">
               SSH Деплой (БЦВМ)
-              <span className={`h-2 w-2 rounded-full ${isSshDeploying ? 'bg-red-500 animate-pulse' : 'bg-neutral-200'}`}></span>
+              <span className={`h-2 w-2 rounded-full ${isSshDeploying || isSshCompiling ? 'bg-red-500 animate-pulse' : 'bg-neutral-200'}`}></span>
             </summary>
             <div className="px-4 pb-4 space-y-3 pt-2">
               <div className="grid grid-cols-2 gap-2">
@@ -818,7 +890,7 @@ export default function App() {
                     : 'bg-neutral-800 hover:bg-neutral-700 text-white shadow-neutral-500/10'
                   }`}
                 >
-                  {isSshCompiling ? 'СБОРКА (ARM)...' : 'СКОМПИЛИРОВАТЬ ДЛЯ ARM'}
+                  {isSshCompiling ? 'ВЫПОЛНЯЕТСЯ СБОРКА...' : 'СКОМПИЛИРОВАТЬ ДЛЯ ARM'}
                 </motion.button>
 
                 <motion.button 
@@ -835,9 +907,30 @@ export default function App() {
                 </motion.button>
               </div>
 
+              {isSshCompiling && (
+                <div className="mt-2 space-y-1 bg-neutral-50 p-2.5 rounded-lg border border-neutral-200">
+                  <div className="flex justify-between text-[11px] font-semibold text-neutral-700">
+                    <span className="flex items-center gap-1.5 text-blue-600">
+                      <Activity size={12} className="animate-spin text-blue-500" />
+                      {compileProgress.stage || 'Выполнение сборки...'}
+                    </span>
+                    <span className="text-neutral-500">{compileProgress.pct}%</span>
+                  </div>
+                  <div className="w-full bg-neutral-200 h-1.5 rounded-full overflow-hidden">
+                    <motion.div 
+                      className="bg-blue-600 h-full rounded-full"
+                      initial={{ width: '0%' }}
+                      animate={{ width: `${compileProgress.pct}%` }}
+                      transition={{ duration: 0.3 }}
+                    />
+                  </div>
+                </div>
+              )}
+
               {sshDeployOutput && (
                 <div className="mt-2 text-[10px] font-mono whitespace-pre-wrap bg-neutral-900 text-neutral-300 p-3 rounded-lg max-h-56 overflow-y-auto leading-relaxed border border-neutral-800">
                   {sshDeployOutput}
+                  <div ref={sshLogEndRef} />
                 </div>
               )}
             </div>

@@ -638,35 +638,158 @@ async function bootstrap() {
     res.json({ status: 'success' });
   });
 
-  app.post('/api/ssh-compile', (req, res) => {
-    let outputLog = '>>> Запуск кросс-компиляции для ARM...\n';
-    const command = 'npx tsx run_build_scripts.ts --arm --no-yals';
-    
+  // Background compilation state
+  let activeCompileProcess: any = null;
+  let compileLog = '';
+  let compileStatus: 'idle' | 'running' | 'success' | 'error' = 'idle';
+  let compilePct = 0;
+  let compileStage = '';
+
+  const tmpDir = path.join(process.cwd(), 'tmp');
+  const logFilePath = path.join(tmpDir, 'compile.log');
+
+  if (fs.existsSync(logFilePath)) {
     try {
-      console.log(`Executing: ${command}`);
-      outputLog += `Выполнение команды: ${command}\n`;
-      const output = execSync(command, {
-        encoding: 'utf8',
-        env: { ...process.env }
-      });
-      outputLog += output;
-      
-      if (output.includes('❌ Ошибки сборки!') || output.includes('Error: Failed building') || output.includes('❌ Error:')) {
-        throw new Error('Обнаружены ошибки сборки в одном из модулей.');
+      compileLog = fs.readFileSync(logFilePath, 'utf8');
+      if (compileLog.includes('Завершено успешно') || compileLog.includes('Компиляция завершена успешно!')) {
+        compileStatus = 'success';
+        compilePct = 100;
+        compileStage = 'Успешно завершено!';
+      } else if (compileLog.includes('Ошибка') || compileLog.includes('❌ Ошибки сборки!') || compileLog.includes('Failed building')) {
+        compileStatus = 'error';
+        compilePct = 100;
+        compileStage = 'Завершено с ошибками';
       }
-      
-      outputLog += '\n>>> Компиляция завершена успешно!\n';
-      res.json({ status: 'success', output: outputLog });
-    } catch (error: any) {
-      console.error("Compilation failed:", error);
-      outputLog += `\nОшибка при компиляции: ${error.message}\n`;
-      outputLog += `${error.stdout || ''}\n${error.stderr || ''}`;
-      res.status(500).json({ 
-        status: 'error', 
-        error: error.message, 
-        output: outputLog
-      });
+    } catch (e) {}
+  }
+
+  function appendCompileLog(data: string) {
+    compileLog += data;
+    try {
+      if (!fs.existsSync(tmpDir)) {
+        fs.mkdirSync(tmpDir, { recursive: true });
+      }
+      fs.appendFileSync(logFilePath, data, 'utf8');
+    } catch (err) {
+      console.error("Failed writing to log file:", err);
     }
+  }
+
+  function updateCompileProgress(text: string) {
+    if (text.includes('gpp_installer') || text.includes('Проверка готовности окружения')) {
+      compileStage = 'Проверка наличия компилятора ARM...';
+      compilePct = Math.max(compilePct, 10);
+    }
+    if (text.includes('Запускаем автоматическую установку')) {
+      compileStage = 'Инициализации установки компилятора...';
+      compilePct = Math.max(compilePct, 15);
+    }
+    if (text.includes('Скачивание архива') || text.includes('Attempting download') || text.includes('Скачивание GCC ARM Toolchain')) {
+      compileStage = 'Скачивание Arm GNU Toolchain 15.2.rel1 (~200-300MB)...';
+      compilePct = Math.max(compilePct, 25);
+    }
+    if (text.includes('Архив успешно скачан') || text.includes('Successfully downloaded')) {
+      compileStage = 'Архив скачан. Распаковка архива (может занять 1-2 минуты)...';
+      compilePct = Math.max(compilePct, 45);
+    }
+    if (text.includes('Распаковка завершена') || text.includes('ARM кросс-компилятор успешно настроен')) {
+      compileStage = 'Настройка Toolchain завершена.';
+      compilePct = Math.max(compilePct, 55);
+    }
+    if (text.includes('Running build.sh in cpp_system/bcvm')) {
+      compileStage = 'Компиляция модуля БЦВМ (bcvm)...';
+      compilePct = Math.max(compilePct, 60);
+    }
+    if (text.includes('Running build.sh in cpp_system/asn')) {
+      compileStage = 'Компиляция модуля ASN (asn_simulator)...';
+      compilePct = Math.max(compilePct, 80);
+    }
+    if (text.includes('Все модули успешно скомпилированы')) {
+      compileStage = 'Успешно завершено!';
+      compilePct = 100;
+    }
+    if (text.includes('❌ Ошибки сборки!') || text.includes('Error: Failed building') || text.includes('❌ Error:')) {
+      compileStage = 'Сбой компиляции!';
+      compilePct = 100;
+    }
+  }
+
+  app.post('/api/ssh-compile', (req, res) => {
+    if (compileStatus === 'running') {
+      return res.json({ status: 'success', message: 'Compilation is already running' });
+    }
+
+    compileLog = '>>> Запуск кросс-компиляции для ARM в фоновом режиме...\n';
+    compileStatus = 'running';
+    compilePct = 5;
+    compileStage = 'Запуск скрипта сборки...';
+
+    if (!fs.existsSync(tmpDir)) {
+      try {
+        fs.mkdirSync(tmpDir, { recursive: true });
+      } catch (err) {}
+    }
+    try {
+      fs.writeFileSync(logFilePath, compileLog, 'utf8');
+    } catch (err) {}
+
+    const isWin = process.platform === 'win32';
+    const command = isWin ? 'npx.cmd' : 'npx';
+    const args = ['tsx', 'run_build_scripts.ts', '--arm', '--no-yals'];
+
+    console.log(`Spawning background process: ${command} ${args.join(' ')}`);
+    const p = spawn(command, args, {
+      shell: isWin,
+      env: { ...process.env }
+    });
+
+    activeCompileProcess = p;
+
+    p.stdout.on('data', (data) => {
+      const chunk = data.toString();
+      appendCompileLog(chunk);
+      updateCompileProgress(chunk);
+    });
+
+    p.stderr.on('data', (data) => {
+      const chunk = data.toString();
+      appendCompileLog(chunk);
+      updateCompileProgress(chunk);
+    });
+
+    p.on('close', (code) => {
+      activeCompileProcess = null;
+      if (code === 0 && !compileLog.includes('❌ Ошибки сборки!') && !compileLog.includes('Error: Failed building')) {
+        compileStatus = 'success';
+        compilePct = 100;
+        compileStage = 'Успешно завершено!';
+        appendCompileLog('\n>>> Компиляция завершена успешно!\n');
+      } else {
+        compileStatus = 'error';
+        compilePct = 100;
+        compileStage = 'Завершено с ошибками';
+        appendCompileLog(`\n>>> Ошибка: Процесс завершился с кодом ${code}.\n`);
+      }
+    });
+
+    p.on('error', (err) => {
+      activeCompileProcess = null;
+      compileStatus = 'error';
+      compilePct = 100;
+      compileStage = 'Не удалось запустить компиляцию';
+      appendCompileLog(`\n>>> Не удалось запустить процесс сборки: ${err.message}\n`);
+    });
+
+    res.json({ status: 'success', message: 'Compilation started in background' });
+  });
+
+  app.get('/api/ssh-compile-status', (req, res) => {
+    res.json({
+      status: compileStatus,
+      pct: compilePct,
+      stage: compileStage,
+      output: compileLog
+    });
   });
 
   app.post('/api/ssh-deploy', async (req, res) => {
