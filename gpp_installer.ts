@@ -227,7 +227,7 @@ async function installArmCompiler(): Promise<boolean> {
 
     if (process.platform === 'win32') {
         console.log('📦 Обнаружена ОС Windows. Запускаем автоматическую установку Arm GNU Toolchain...');
-        const url = 'https://developer.arm.com/-/media/Files/downloads/gnu-a/10.3-2021.07/binrel/gcc-arm-10.3-2021.07-mingw-w64-i686-arm-none-linux-gnueabihf.zip';
+        const url = 'https://developer.arm.com/-/media/Files/downloads/gnu/15.2.rel1/binrel/arm-gnu-toolchain-15.2.rel1-mingw-w64-i686-arm-none-linux-gnueabihf.zip';
         const targetDir = path.join(homedir(), 'local');
         const zipPath = path.join(TEMP_DIR, 'arm-toolchain.zip');
         const extractDir = path.join(targetDir, 'arm-toolchain');
