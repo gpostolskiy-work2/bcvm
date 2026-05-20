@@ -37,6 +37,9 @@ function hasGpp(): boolean {
 function hasArmCompiler(): boolean {
     // Check standard PATH first
     if (checkCommand('arm-linux-gnueabihf-g++') || checkCommand('arm-none-linux-gnueabihf-g++')) {
+        if (process.platform === 'win32') {
+            return checkCommand('ninja') || checkCommand('make') || checkCommand('mingw32-make');
+        }
         return true;
     }
     
@@ -50,6 +53,9 @@ function hasArmCompiler(): boolean {
         if (existsSync(p)) {
             process.env.PATH = `${p}${path.delimiter}${process.env.PATH}`;
             if (checkCommand('arm-linux-gnueabihf-g++') || checkCommand('arm-none-linux-gnueabihf-g++')) {
+                if (process.platform === 'win32') {
+                    return checkCommand('ninja') || checkCommand('make') || checkCommand('mingw32-make');
+                }
                 return true;
             }
         }
@@ -226,14 +232,47 @@ async function installArmCompiler(): Promise<boolean> {
     }
 
     if (process.platform === 'win32') {
-        console.log('📦 Обнаружена ОС Windows. Запускаем автоматическую установку Arm GNU Toolchain...');
+        console.log('📦 Обнаружена ОС Windows. Проверяем установку Arm GNU Toolchain...');
         const url = 'https://developer.arm.com/-/media/Files/downloads/gnu/15.2.rel1/binrel/arm-gnu-toolchain-15.2.rel1-mingw-w64-i686-arm-none-linux-gnueabihf.zip';
         const targetDir = path.join(homedir(), 'local');
         const zipPath = path.join(TEMP_DIR, 'arm-toolchain.zip');
         const extractDir = path.join(targetDir, 'arm-toolchain');
+        const binDir = path.join(extractDir, 'bin');
+        const gccExe = path.join(binDir, 'arm-none-linux-gnueabihf-g++.exe');
 
         if (!existsSync(TEMP_DIR)) mkdirSync(TEMP_DIR, { recursive: true });
         if (!existsSync(targetDir)) mkdirSync(targetDir, { recursive: true });
+
+        const ensureNinja = async (bDir: string): Promise<void> => {
+            const ninjaExe = path.join(bDir, 'ninja.exe');
+            if (!existsSync(ninjaExe) && !checkCommand('ninja') && !checkCommand('make') && !checkCommand('mingw32-make')) {
+                console.log('⚡ Настраиваем встроенный Ninja для сборки на Windows...');
+                const ninjaZip = path.join(TEMP_DIR, 'ninja.zip');
+                const ninjaUrl = 'https://github.com/ninja-build/ninja/releases/download/v1.12.1/ninja-win.zip';
+                try {
+                    await download(ninjaUrl, ninjaZip);
+                    console.log('✅ Архив Ninja успешно скачан. Распаковка...');
+                    try {
+                        execSync(`unzip -o "${ninjaZip}" -d "${bDir}"`, { stdio: 'ignore' });
+                    } catch (e) {
+                        execSync(`powershell -Command "Expand-Archive -Path '${ninjaZip}' -DestinationPath '${bDir}' -Force"`);
+                    }
+                    if (existsSync(ninjaExe)) {
+                        console.log('✅ Исполняемый файл ninja.exe успешно добавлен в bin!');
+                    }
+                } catch (nErr: any) {
+                    console.warn('⚠️ Ошибка при установке Ninja:', nErr.message);
+                }
+            }
+        };
+
+        // If compiler is already installed, verify Ninja and finish
+        if (existsSync(gccExe)) {
+            console.log('✅ Arm GNU Toolchain уже распакован.');
+            await ensureNinja(binDir);
+            process.env.PATH = `${binDir}${path.delimiter}${process.env.PATH}`;
+            return true;
+        }
 
         console.log(`📥 Скачивание архива с GCC ARM Toolchain (${url})...`);
         try {
@@ -269,10 +308,10 @@ async function installArmCompiler(): Promise<boolean> {
                 return null;
             };
 
-            const binDir = findBinPath(extractDir);
-            if (binDir) {
-                console.log(`🔗 Найдена папка с исполняемыми файлами: ${binDir}`);
-                const innerDir = path.dirname(binDir);
+            const foundBinDir = findBinPath(extractDir);
+            if (foundBinDir) {
+                console.log(`🔗 Найдена папка с исполняемыми файлами: ${foundBinDir}`);
+                const innerDir = path.dirname(foundBinDir);
                 if (innerDir !== extractDir) {
                     console.log('📂 Приведение структуры директорий к стандартному виду...');
                     readdirSync(innerDir).forEach(file => {
@@ -282,8 +321,11 @@ async function installArmCompiler(): Promise<boolean> {
                     });
                     try { rmdirSync(innerDir); } catch(e) {}
                 }
+                
+                await ensureNinja(binDir);
+                
                 console.log('✅ ARM кросс-компилятор успешно настроен локально!');
-                process.env.PATH = `${path.join(extractDir, 'bin')}${path.delimiter}${process.env.PATH}`;
+                process.env.PATH = `${binDir}${path.delimiter}${process.env.PATH}`;
                 return true;
             } else {
                 console.error('❌ Ошибка: В распакованном архиве не найдена папка bin!');

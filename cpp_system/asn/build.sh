@@ -46,22 +46,22 @@ echo "------------------------"
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR" || exit
 
-CMAKE_OPTS=""
+declare -a CMAKE_OPTS=()
 if [[ "$1" == "--arm" ]]; then
-    CMAKE_OPTS="-DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=arm"
+    CMAKE_OPTS=(-DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=arm -DCMAKE_C_COMPILER="$ARM_GCC" -DCMAKE_CXX_COMPILER="$ARM_GXX")
     if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || "$(uname)" =~ "MINGW" || "$(uname)" =~ "MSYS" ]]; then
-        if command -v mingw32-make &> /dev/null; then
-            CMAKE_OPTS="$CMAKE_OPTS -G \"MinGW Makefiles\""
+        if command -v ninja &> /dev/null; then
+            CMAKE_OPTS+=(-G "Ninja")
+        elif command -v mingw32-make &> /dev/null; then
+            CMAKE_OPTS+=(-G "MinGW Makefiles")
         elif command -v make &> /dev/null; then
-            CMAKE_OPTS="$CMAKE_OPTS -G \"Unix Makefiles\""
-        elif command -v ninja &> /dev/null; then
-            CMAKE_OPTS="$CMAKE_OPTS -G \"Ninja\""
+            CMAKE_OPTS+=(-G "Unix Makefiles")
         fi
     fi
 fi
 
-echo "Configuring project with: cmake $CMAKE_OPTS \"$SRC_DIR\""
-cmake $CMAKE_OPTS "$SRC_DIR"
+echo "Configuring project with: cmake ${CMAKE_OPTS[@]} \"$SRC_DIR\""
+cmake "${CMAKE_OPTS[@]}" "$SRC_DIR"
 
 echo "Building project..."
 cmake --build .
