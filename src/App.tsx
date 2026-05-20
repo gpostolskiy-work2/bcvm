@@ -107,6 +107,10 @@ export default function App() {
   const hintTimerRef = useRef<NodeJS.Timeout | null>(null);
   const [showStartHint, setShowStartHint] = useState(false);
 
+  const [sshNoBuild, setSshNoBuild] = useState(false);
+  const [isSshDeploying, setIsSshDeploying] = useState(false);
+  const [sshDeployOutput, setSshDeployOutput] = useState('');
+
   const sendFiles = async () => {
     if (!files.cyclogram || !files.mission) return;
     setIsPayloadUpdating(true);
@@ -125,6 +129,28 @@ export default function App() {
     } catch (e) {
       console.error('Failed to upload files.');
       setIsPayloadUpdating(false);
+    }
+  };
+
+  const handleSshDeploy = async () => {
+    setIsSshDeploying(true);
+    setSshDeployOutput('');
+    try {
+      const resp = await fetch('/api/ssh-deploy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ noBuild: sshNoBuild })
+      });
+      const data = await resp.json();
+      if (resp.ok && data.status === 'success') {
+        setSshDeployOutput(data.output || 'Успешно отправлено.');
+      } else {
+        setSshDeployOutput(data.output || `Ошибка: ${data.error || 'Неизвестная ошибка'}`);
+      }
+    } catch (e: any) {
+      setSshDeployOutput(`Ошибка сети: ${e.message || e}`);
+    } finally {
+      setIsSshDeploying(false);
     }
   };
 
@@ -696,6 +722,43 @@ export default function App() {
                   {isPayloadUpdating ? 'ОБНОВЛЕНО' : 'ОБНОВИТЬ ДАННЫЕ'}
                 </motion.button>
               </div>
+            </div>
+          </details>
+
+          <details className="bg-white border border-neutral-200 rounded-lg shadow-xl group border-l-4 border-l-red-500">
+            <summary className="p-4 cursor-pointer flex items-center justify-between text-sm font-bold text-red-500 uppercase tracking-widest list-none">
+              SSH Деплой (БЦВМ)
+              <span className={`h-2 w-2 rounded-full ${isSshDeploying ? 'bg-red-500 animate-pulse' : 'bg-neutral-200'}`}></span>
+            </summary>
+            <div className="px-4 pb-4 space-y-3 pt-2">
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input 
+                  type="checkbox"
+                  checked={sshNoBuild}
+                  onChange={(e) => setSshNoBuild(e.target.checked)}
+                  className="accent-red-500 h-3.5 w-3.5 animate-none"
+                />
+                <span className="text-[10px] text-neutral-600 font-bold uppercase">Не собирать заново (arm)</span>
+              </label>
+
+              <motion.button 
+                whileTap={{ scale: 0.98 }}
+                onClick={handleSshDeploy}
+                disabled={isSshDeploying}
+                className={`w-full py-2.5 text-xs font-bold rounded-lg transition-all shadow-md ${
+                  isSshDeploying 
+                  ? 'bg-neutral-100 text-neutral-400 cursor-not-allowed' 
+                  : 'bg-red-600 hover:bg-red-500 text-white shadow-red-500/15'
+                }`}
+              >
+                {isSshDeploying ? 'ОТПРАВКА...' : 'ОТПРАВИТЬ ПО SSH'}
+              </motion.button>
+
+              {sshDeployOutput && (
+                <div className="mt-2 text-[9px] font-mono whitespace-pre-wrap bg-neutral-900 text-red-400 p-3 rounded-lg max-h-48 overflow-y-auto leading-relaxed border border-neutral-800">
+                  {sshDeployOutput}
+                </div>
+              )}
             </div>
           </details>
 

@@ -637,6 +637,31 @@ async function bootstrap() {
     res.json({ status: 'success' });
   });
 
+  app.post('/api/ssh-deploy', (req, res) => {
+    const { noBuild } = req.body;
+    const args: string[] = [];
+    if (noBuild) {
+      args.push('--no-build');
+    }
+    args.push('--no-yals');
+    
+    try {
+      console.log(`Executing bash run_build_scripts.sh ${args.join(' ')}`);
+      const output = execSync(`bash run_build_scripts.sh ${args.join(' ')}`, {
+        encoding: 'utf8',
+        env: { ...process.env }
+      });
+      res.json({ status: 'success', output });
+    } catch (error: any) {
+      console.error("SSH deploy failed:", error);
+      res.status(500).json({ 
+        status: 'error', 
+        error: error.message, 
+        output: `${error.stdout || ''}\n${error.stderr || ''}` || error.message 
+      });
+    }
+  });
+
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
